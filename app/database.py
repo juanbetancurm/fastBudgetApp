@@ -68,6 +68,9 @@ def initialize(path, initial_password=None):
                 blocked_until REAL NOT NULL DEFAULT 0
             );
         """)
+        # Gunicorn may initialize multiple workers at once. Acquire SQLite's
+        # writer lock before checking/inserting the singleton settings row.
+        db.execute("BEGIN IMMEDIATE")
         row = db.execute("SELECT id FROM settings WHERE id = 1").fetchone()
         if row is None:
             if not initial_password or len(initial_password) < 12:

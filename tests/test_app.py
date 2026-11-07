@@ -1,11 +1,12 @@
 import os
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from app import create_app
 from app.budget import calculate_summary
-from app.database import connection
+from app.database import connection, initialize
 from scripts.backup_db import backup
 
 
@@ -123,6 +124,13 @@ class TravelBudgetTests(unittest.TestCase):
         with connection(self.path) as conn:
             self.assertTrue(conn.execute("PRAGMA foreign_keys").fetchone()[0])
             self.assertNotEqual(conn.execute("SELECT password_hash FROM settings").fetchone()[0], "correct-horse-battery")
+
+    def test_concurrent_database_initialization_is_safe(self):
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(lambda _: initialize(self.path, "correct-horse-battery"), range(4)))
+        with connection(self.path) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM settings").fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0], 7)
 
     def test_sqlite_online_backup_contains_expenses(self):
         self.login()
