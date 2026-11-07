@@ -77,16 +77,16 @@
           <form id="expense-form" class="expense-form" novalidate>
             <input type="hidden" id="expense-id">
             <div class="field date-field"><label for="expense-date-text">Fecha</label><div class="date-picker-control"><input id="expense-date-text" name="date_display" type="text" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa" aria-describedby="expense-date-hint" required><input id="expense-date-picker" class="native-date-picker" type="date" tabindex="-1" aria-hidden="true"><button id="open-expense-date" class="calendar-button" type="button" aria-label="Elegir fecha"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="16" height="15" rx="2"/><path d="M8 3.5v5M16 3.5v5M4 10h16"/></svg></button></div><span id="expense-date-hint" class="visually-hidden">Formato día, mes y año: DD/MM/AAAA.</span></div>
-            <div class="field description-field"><label for="expense-description">Descripción</label><input id="expense-description" name="description" maxlength="120" autocomplete="off" placeholder="Opcional"></div>
+            <div class="field description-field"><label for="expense-description">Observación</label><input id="expense-description" name="description" maxlength="120" autocomplete="off" placeholder="Opcional" aria-describedby="amount-hint" title="Observación opcional, por ejemplo: desayuno o almuerzo"></div>
             <div class="field category-field"><label for="expense-category">Categoría</label><div class="select-wrap"><select id="expense-category" name="category_id" required></select></div></div>
-            <div class="field amount-field"><label for="expense-amount">Valor en pesos</label><div class="money-input"><span aria-hidden="true">$</span><input id="expense-amount" name="amount" type="number" min="1" step="1" inputmode="numeric" placeholder="125000" required aria-describedby="amount-hint"></div></div>
+            <div class="field amount-field"><label for="expense-amount" id="amount-label">Valor en pesos</label><div class="money-input"><button type="button" class="currency-switch" id="currency-switch" data-currency="COP" aria-label="Moneda del valor: pesos colombianos. Toca para cambiar a euros." title="Cambiar entre pesos y euros"><span id="currency-code">COP</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4 3.5 7.5 7 11M3.5 7.5h14M17 13l3.5 3.5L17 20m3.5-3.5h-14"/></svg></button><input id="expense-amount" name="amount" type="number" min="1" step="1" inputmode="numeric" placeholder="125000" required aria-describedby="amount-hint"></div></div>
             <div class="form-actions">
               <button class="button primary save-button" id="save-expense" type="submit"><span class="save-symbol" aria-hidden="true">＋</span><span class="save-label">Guardar gasto</span></button>
               <button class="button ghost hidden" id="cancel-edit" type="button">Cancelar</button>
             </div>
           </form>
           <div class="form-foot">
-            <p id="amount-hint" class="form-hint">Escribe el valor en pesos, sin puntos.</p>
+            <p id="amount-hint" class="form-hint">Elige la categoría y el valor. La observación es opcional (ej. desayuno).</p>
             <p id="expense-feedback" class="feedback" role="status" aria-live="polite"></p>
           </div>
         </section>
@@ -185,9 +185,7 @@
       <div class="settings-dates"><div class="field"><label for="setting-start">Inicio del viaje</label><input id="setting-start" type="date" required></div><div class="field"><label for="setting-end">Fin del viaje</label><input id="setting-end" type="date" required></div></div>
       <button class="button primary full" type="submit">Guardar cambios</button>
     </form>
-    <div class="category-settings"><h3>Categorías</h3><p class="muted small-copy">Cambiar el nombre conserva los gastos anteriores.</p><ul id="category-settings-list" class="category-list"></ul>
-      <form id="category-form" class="add-category"><label class="visually-hidden" for="new-category">Nueva categoría</label><input id="new-category" maxlength="40" placeholder="Nueva categoría" required><button class="button secondary" type="submit">Agregar</button></form>
-    </div>
+    <div class="category-settings"><h3>Categorías</h3><p class="muted small-copy">Son fijas para que los gráficos se mantengan claros. Usa la descripción del gasto para dar más detalle.</p><ul id="category-settings-list" class="category-list"></ul></div>
     <p id="settings-feedback" class="feedback" role="status" aria-live="polite"></p>
   </dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

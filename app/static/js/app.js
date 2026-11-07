@@ -33,6 +33,7 @@
   let expenses = [], categories = [], settings = {}, summary = null;
   let categoryChart, dailyChart, toastTimer, saving = false, freshId = null, shownRemaining = null;
   let currentView = 'expenses';
+  let entryCurrency = 'COP';
 
   async function api(path, options = {}) {
     const response = await fetch(path, {
@@ -87,7 +88,7 @@
 
   function renderCategories() {
     const selected = $('#expense-category').value;
-    $('#expense-category').innerHTML = categories
+    $('#expense-category').innerHTML = '<option value="" selected>Elige…</option>' + categories
       .map((category) => `<option value="${category.id}">${escapeHtml(category.name)}</option>`).join('');
     if (categories.some((category) => String(category.id) === selected)) {
       $('#expense-category').value = selected;
@@ -130,11 +131,12 @@
     }
 
     root.innerHTML = sorted.map((expense) => {
-      const name = escapeHtml(expense.description || 'Gasto');
+      const note = expense.description.trim();
+      const name = escapeHtml(note || expense.category);
       return `
         <article class="expense-row${expense.id === freshId ? ' fresh' : ''}">
           <span class="expense-date">${dateLabel(expense.date, { day: '2-digit', month: 'short' })}</span>
-          <span class="expense-description" title="${name}">${name}</span>
+          <span class="expense-description${note ? '' : ' empty'}" title="${name}">${note ? name : 'Sin observación'}</span>
           <span class="expense-category">${escapeHtml(expense.category)}</span>
           <strong class="expense-amount">${money(expense.amount)}</strong>
           <span class="row-actions">
@@ -212,11 +214,21 @@
     renderRemainingEur();
   }
 
+  // Agrupa categorías: máximo `max` barras; lo que sobra (y "Otros") se suma en "Otros".
+  function groupCategories(list, max = 6) {
+    const isOtros = (item) => item.name.trim().toLowerCase() === 'otros';
+    const main = list.filter((item) => !isOtros(item)).sort((a, b) => b.amount - a.amount);
+    const otros = list.filter(isOtros);
+    if (main.length + (otros.length ? 1 : 0) <= max) return [...main, ...otros.map((item) => ({ ...item, name: 'Otros' }))];
+    const keep = main.slice(0, max - 1), rest = [...main.slice(max - 1), ...otros];
+    return [...keep, { name: 'Otros', amount: rest.reduce((sum, item) => sum + item.amount, 0), includes: rest.filter((item) => !isOtros(item)).map((item) => item.name) }];
+  }
+
   function renderMiniCategories() {
     const root = $('#mini-cats');
-    const list = summary.categories.slice(0, 6);
+    const list = groupCategories(summary.categories, 6);
     if (!list.length) { root.innerHTML = '<p class="mini-empty">Cuando registres gastos, aquí verás las categorías con más gasto.</p>'; return; }
-    const max = list[0].amount;
+    const max = Math.max(...list.map((item) => item.amount));
     root.innerHTML = list.map((item) => `
       <div class="mini-cat"><span class="mini-cat-name">${escapeHtml(item.name)}</span><span class="mini-cat-amount">${money(item.amount)}</span>
       <span class="mini-cat-bar" aria-hidden="true"><span style="width:${Math.max(3, (item.amount / max) * 100)}%"></span></span></div>`).join('');
@@ -300,14 +312,16 @@
 
     const animation = reducedMotion ? false : { duration: 700, easing: 'easeOutCubic' };
     const total = data.total_spent;
+    const cats = groupCategories(data.categories, 6);
+    const topIndex = cats.reduce((best, item, index) => item.amount > cats[best].amount ? index : best, 0);
     categoryChart = new Chart(categoryCanvas.getContext('2d'), {
       type: 'bar',
       data: {
-        labels: data.categories.map((item) => item.name),
+        labels: cats.map((item) => item.name),
         datasets: [{
-          data: data.categories.map((item) => item.amount),
-          backgroundColor: data.categories.map((_, index) => index === 0 ? '#c0572d' : '#ebae8c'),
-          hoverBackgroundColor: data.categories.map((_, index) => index === 0 ? '#a24520' : '#e0976f'),
+          data: cats.map((item) => item.amount),
+          backgroundColor: cats.map((_, index) => index === topIndex ? '#c0572d' : '#ebae8c'),
+          hoverBackgroundColor: cats.map((_, index) => index === topIndex ? '#a24520' : '#e0976f'),
           borderRadius: 7, borderSkipped: false, maxBarThickness: 30, categoryPercentage: .82, barPercentage: .92,
         }],
       },
@@ -322,6 +336,7 @@
             callbacks: {
               title: (items) => items[0].label,
               label: (item) => `${money(item.raw)} · ${Math.round(item.raw / total * 100)} % del gasto`,
+              afterLabel: (item) => cats[item.dataIndex].includes && cats[item.dataIndex].includes.length ? `Incluye: ${cats[item.dataIndex].includes.join(', ')}` : '',
             },
           },
         },
@@ -387,7 +402,7 @@
     $('#setting-start').value = settings.trip_start;
     $('#setting-end').value = settings.trip_end;
     $('#category-settings-list').innerHTML = categories.map((category) => `
-      <li><span>${escapeHtml(category.name)}</span><button type="button" data-rename="${category.id}" data-name="${escapeHtml(category.name)}">Cambiar nombre</button></li>`).join('');
+      <li><span>${escapeHtml(category.name)}</span></li>`).join('');
   }
 
   /* ---------- Formulario ---------- */
@@ -437,10 +452,48 @@
     else { picker.focus(); picker.click(); }
   }
 
+  function setEntryCurrency(currency) {
+    entryCurrency = currency;
+    const euros = currency === 'EUR';
+    const toggle = $('#currency-switch');
+    toggle.dataset.currency = currency;
+    toggle.setAttribute('aria-label', euros
+      ? 'Moneda del valor: euros. Toca para cambiar a pesos colombianos.'
+      : 'Moneda del valor: pesos colombianos. Toca para cambiar a euros.');
+    $('#currency-code').textContent = currency;
+    $('.amount-field').classList.toggle('eur', euros);
+    $('#amount-label').textContent = euros ? 'Valor en euros' : 'Valor en pesos';
+    const input = $('#expense-amount');
+    input.type = euros ? 'text' : 'number';
+    input.setAttribute('inputmode', euros ? 'decimal' : 'numeric');
+    input.placeholder = euros ? '12,50' : '125000';
+    clearInvalid();
+    updateAmountHint();
+  }
+
+  // Valor del campo en pesos enteros; null si está vacío o es inválido, o si falta la tasa.
+  function enteredPesos() {
+    const raw = $('#expense-amount').value.trim();
+    if (entryCurrency === 'COP') return /^[0-9]{1,12}$/.test(raw) && Number(raw) >= 1 ? Number(raw) : null;
+    const euros = parseNumber(raw);
+    if (!Number.isFinite(euros) || euros <= 0 || !fx.active) return null;
+    const pesos = Math.round(euros * fx.active.rate);
+    return pesos >= 1 && pesos <= 999999999999 ? pesos : null;
+  }
+
   function updateAmountHint() {
     const hint = $('#amount-hint');
-    const value = Number($('#expense-amount').value);
-    if (!value || value < 1) { hint.textContent = 'Escribe el valor en pesos, sin puntos.'; return; }
+    const raw = $('#expense-amount').value.trim();
+    if (entryCurrency === 'EUR') {
+      if (!fx.active) { hint.textContent = 'No hay tasa de cambio. Escríbela en el conversor o elige COP.'; return; }
+      const pesos = enteredPesos();
+      hint.textContent = pesos
+        ? `${nf2.format(parseNumber(raw))} EUR ≈ ${money(pesos)} COP · tasa ${nf2.format(fx.active.rate)}`
+        : 'Escribe el valor en euros. Se guardará en pesos con la tasa del conversor.';
+      return;
+    }
+    const value = Number(raw);
+    if (!value || value < 1) { hint.textContent = 'Elige la categoría y el valor. La observación es opcional (ej. desayuno).'; return; }
     const eur = fx.active ? ` · ≈ ${nf2.format(value / fx.active.rate)} EUR` : '';
     hint.textContent = `${money(value)} COP${eur}`;
   }
@@ -454,11 +507,19 @@
     feedback($('#expense-feedback'), '');
     const expenseDate = parseDisplayDate($('#expense-date-text').value);
     if (!expenseDate) return markInvalid($('#expense-date-text'), 'Escribe una fecha real, con el formato DD/MM/AAAA.');
-    if (!$('#expense-category').value) return markInvalid($('#expense-category'), 'Elige una categoría.');
-    const amountText = $('#expense-amount').value.trim();
-    if (!/^[0-9]{1,12}$/.test(amountText) || Number(amountText) < 1) {
-      return markInvalid($('#expense-amount'), 'Escribe el valor en pesos: un número entero mayor que cero, sin puntos ni comas.');
+    if (!$('#expense-category').value) return markInvalid($('#expense-category'), 'Elige una categoría para el gasto.');
+    const euros = entryCurrency === 'EUR';
+    if (euros && !fx.active) {
+      return markInvalid($('#expense-amount'), 'No hay tasa de cambio. Escríbela en el conversor o elige COP.');
     }
+    const pesos = enteredPesos();
+    if (!pesos) {
+      return markInvalid($('#expense-amount'), euros
+        ? 'Escribe el valor en euros, por ejemplo 12,50.'
+        : 'Escribe el valor en pesos: un número entero mayor que cero, sin puntos ni comas.');
+    }
+    const amountText = String(pesos);
+    const enteredEuros = euros ? parseNumber($('#expense-amount').value) : null;
     const formData = {
       date: expenseDate,
       description: $('#expense-description').value,
@@ -476,7 +537,8 @@
       await loadAll();
       resetExpenseForm();
       feedback($('#expense-feedback'), id ? 'Gasto actualizado.' : 'Gasto guardado.');
-      toast(id ? 'Gasto actualizado' : 'Gasto guardado');
+      const base = id ? 'Gasto actualizado' : 'Gasto guardado';
+      toast(euros ? `${base}: ${nf2.format(enteredEuros)} EUR = ${money(pesos)}` : base);
       saveButton.classList.add('saved');
       setSaveLabel('¡Guardado!', '✓');
       setTimeout(() => {
@@ -494,6 +556,7 @@
   });
 
   $('#expense-amount').addEventListener('input', () => { clearInvalid(); updateAmountHint(); });
+  $('#currency-switch').addEventListener('click', () => { setEntryCurrency(entryCurrency === 'COP' ? 'EUR' : 'COP'); $('#expense-amount').focus(); });
   ['#expense-description', '#expense-category', '#expense-date-text'].forEach((selector) => $(selector).addEventListener('input', clearInvalid));
   $('#cancel-edit').addEventListener('click', () => { resetExpenseForm(); feedback($('#expense-feedback'), ''); });
   $('#expense-list').addEventListener('click', async (event) => {
@@ -507,6 +570,7 @@
       setExpenseDate(expense.date);
       $('#expense-description').value = expense.description;
       $('#expense-category').value = expense.category_id;
+      setEntryCurrency('COP');
       $('#expense-amount').value = expense.amount;
       $('#entry-title').textContent = 'Editar gasto';
       setSaveLabel('Guardar cambios', '✓');
@@ -575,32 +639,6 @@
       await loadAll();
       feedback($('#settings-feedback'), 'Configuración guardada.');
       toast('Configuración guardada');
-    } catch (error) {
-      feedback($('#settings-feedback'), error.message, true);
-    }
-  });
-
-  $('#category-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    try {
-      await api('/api/categories', { method: 'POST', body: JSON.stringify({ name: $('#new-category').value }) });
-      $('#new-category').value = '';
-      await loadAll();
-      feedback($('#settings-feedback'), 'Categoría agregada.');
-    } catch (error) {
-      feedback($('#settings-feedback'), error.message, true);
-    }
-  });
-
-  $('#category-settings-list').addEventListener('click', async (event) => {
-    const button = event.target.closest('[data-rename]');
-    if (!button) return;
-    const name = prompt('Nuevo nombre para la categoría:', button.dataset.name);
-    if (name === null) return;
-    try {
-      await api(`/api/categories/${button.dataset.rename}`, { method: 'PUT', body: JSON.stringify({ name }) });
-      await loadAll();
-      feedback($('#settings-feedback'), 'Categoría actualizada.');
     } catch (error) {
       feedback($('#settings-feedback'), error.message, true);
     }

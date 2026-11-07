@@ -154,7 +154,7 @@ h1, h2, h3, p, dl, dd { margin: 0; }
 
 /* ---------- Formulario ---------- */
 .entry-card { padding: 16px 20px 12px; }
-.expense-form { display: grid; grid-template-columns: 142px minmax(0, 1fr) minmax(158px, 1.05fr) minmax(0, .95fr); gap: 10px 12px; align-items: end; }
+.expense-form { display: grid; grid-template-columns: 150px minmax(0, 1fr) minmax(0, 1fr) 156px; gap: 10px 12px; align-items: end; }
 .field { display: grid; gap: 5px; min-width: 0; }
 .field label, .filter-control label { color: var(--ink-soft); font-size: 13px; font-weight: 650; }
 .optional { color: var(--muted); font-weight: 500; }
@@ -177,11 +177,17 @@ h1, h2, h3, p, dl, dd { margin: 0; }
 .calendar-button { z-index: 2; grid-area: 1 / 2; display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--muted); transition: color .15s, background .15s; }
 .calendar-button:hover { background: var(--accent-pale); color: var(--accent); }
 .calendar-button svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.money-input { display: flex; height: 50px; align-items: center; padding-left: 13px; border-radius: var(--r-sm); background: var(--surface); box-shadow: 0 0 0 1px var(--line-strong), inset 0 1px 2px rgba(50, 38, 110, .05); color: var(--muted); font-weight: 600; transition: box-shadow .15s ease; }
+.money-input { display: flex; height: 50px; align-items: center; padding-left: 7px; border-radius: var(--r-sm); background: var(--surface); box-shadow: 0 0 0 1px var(--line-strong), inset 0 1px 2px rgba(50, 38, 110, .05); color: var(--muted); font-weight: 600; transition: box-shadow .15s ease; }
 .money-input:focus-within { box-shadow: 0 0 0 2px var(--accent), 0 0 0 5px rgba(91, 71, 209, .22); }
 .field.invalid .money-input { box-shadow: 0 0 0 2px var(--danger), 0 0 0 5px rgba(166, 58, 47, .14); }
-.money-input input { height: 100% !important; padding: 0 12px 0 6px !important; box-shadow: none !important; background: transparent !important; font-size: 19px !important; font-weight: 700; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+.money-input input { height: 100% !important; min-width: 0; padding: 0 10px 0 8px !important; box-shadow: none !important; background: transparent !important; font-size: 19px !important; font-weight: 700; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
 .money-input input::-webkit-outer-spin-button, .money-input input::-webkit-inner-spin-button { margin: 0; -webkit-appearance: none; }
+.currency-switch { display: inline-flex; flex: none; align-items: center; gap: 5px; height: 36px; margin-right: 2px; padding: 0 9px; border: 0; border-radius: 9px; background: var(--accent-pale); color: var(--accent-deep); font-size: 13px; font-weight: 800; letter-spacing: .04em; box-shadow: inset 0 0 0 1px var(--periwinkle); transition: background .18s var(--ease), transform .14s var(--ease); }
+.currency-switch:hover { background: #e3deff; }
+.currency-switch:active { transform: scale(.96); }
+.currency-switch svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.field label[for="expense-amount"] { white-space: nowrap; }
+.amount-field.eur .money-input { background: #f5f3ff; }
 .form-actions { grid-column: 1 / -1; display: flex; gap: 10px; }
 .form-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 26px; margin-top: 6px; }
 .form-hint { color: var(--muted); font-size: 13px; }
@@ -241,6 +247,8 @@ h1, h2, h3, p, dl, dd { margin: 0; }
 @keyframes fresh { 0%, 35% { background: var(--accent-pale); } 100% { background: transparent; } }
 .expense-date { color: var(--muted); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .expense-description { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.expense-description.empty { color: var(--muted); font-style: italic; font-weight: 500; }
+.field select:invalid { color: #6b6890; }
 .expense-category { justify-self: start; max-width: 100%; overflow: hidden; padding: 3px 10px; border-radius: 99px; background: var(--paper); color: var(--ink-soft); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; box-shadow: inset 0 0 0 1px var(--line); }
 .expense-amount { text-align: right; font-size: 16px; font-variant-numeric: tabular-nums; }
 .row-actions { display: flex; justify-content: flex-end; }
