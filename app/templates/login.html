@@ -1,13 +1,14 @@
 <!doctype html>
-<html lang="es">
+<html lang="es-CO">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light"><title>Iniciar sesión · Mi viaje</title>
+  <meta name="color-scheme" content="light"><meta name="theme-color" content="#f3f1ec"><title>Iniciar sesión · Mi viaje</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <script defer src="{{ url_for('static', filename='js/avatar.js') }}"></script>
 </head>
 <body class="login-page">
   <main class="login-card">
-    <div class="brand-mark" aria-hidden="true">V</div>
+    <div class="login-identity"><span class="login-avatar"><span class="avatar-fallback" aria-hidden="true">M</span><img src="{{ url_for('static', filename='img/mariSprite.png') }}" alt="Avatar de Mari"></span><span class="brand-name">Mi viaje</span></div>
     <p class="eyebrow">TU VIAJE, BAJO CONTROL</p>
     <h1>Bienvenido</h1>
     <p class="muted">Inicia sesión para consultar y registrar tus gastos.</p>
@@ -18,7 +19,7 @@
       <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
       <button class="button primary full" type="submit">Iniciar sesión</button>
     </form>
-    <p class="login-foot">Tus gastos están protegidos.</p>
+    <p class="login-foot">Acceso privado · Tus gastos están protegidos</p>
   </main>
 </body>
 </html>

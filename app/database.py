@@ -34,7 +34,8 @@ def connection(path):
 
 def initialize(path, initial_password=None):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with connect(path) as db:
+    db = connect(path)
+    try:
         db.executescript("""
             CREATE TABLE IF NOT EXISTS settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -84,3 +85,6 @@ def initialize(path, initial_password=None):
             if not initial_password or len(initial_password) < 12:
                 raise RuntimeError("Define ADMIN_PASSWORD con al menos 12 caracteres para completar la configuración inicial.")
             db.execute("UPDATE settings SET password_hash = ? WHERE id = 1", (generate_password_hash(initial_password),))
+        db.commit()
+    finally:
+        db.close()
