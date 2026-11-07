@@ -1,6 +1,0 @@
-@media (max-width: 650px) {
-  .top-actions > .settings-open { display: none; }
-  .top-actions form { display: block; }
-}
-.progress-copy #recommendation { margin: 5px 0 0; font-size: 12px; color: #657970; }
-.progress-copy .original-daily { margin: 3px 0 0; font-size: 11px; color: #84938b; }

@@ -172,3 +172,41 @@ def summary():
         settings = conn.execute("SELECT * FROM settings WHERE id=1").fetchone()
         expenses = conn.execute("SELECT e.expense_date, e.amount, c.name AS category FROM expenses e JOIN categories c ON c.id=e.category_id").fetchall()
     return jsonify(calculate_summary(settings, expenses))
+
+
+# --- Tasa EUR→COP informativa -------------------------------------------------
+# Solo lectura y sin base de datos: consulta una fuente pública sin llave y guarda
+# el resultado unos minutos en memoria. El navegador no puede consultarla directo
+# por la política CSP (connect-src 'self'), por eso pasa por este endpoint.
+FX_URL = "https://open.er-api.com/v6/latest/EUR"
+FX_TTL_SECONDS = 6 * 60 * 60
+_fx_cache = {"fetched": 0.0, "data": None}
+
+
+def fetch_fx_rate():
+    import json
+    import time
+    from email.utils import parsedate_to_datetime
+    from urllib.request import Request, urlopen
+
+    now = time.time()
+    if _fx_cache["data"] and now - _fx_cache["fetched"] < FX_TTL_SECONDS:
+        return _fx_cache["data"]
+    request_ = Request(FX_URL, headers={"User-Agent": "presupuesto-viaje/1.0", "Accept": "application/json"})
+    with urlopen(request_, timeout=6) as response:
+        raw = json.loads(response.read(200_000))
+    rate = float(raw["rates"]["COP"])
+    if raw.get("result") != "success" or not 100 < rate < 100_000:
+        raise ValueError("Tasa fuera de rango")
+    updated = parsedate_to_datetime(raw["time_last_update_utc"]).astimezone(timezone.utc).isoformat()
+    data = {"rate": rate, "updated": updated, "source": "ExchangeRate-API"}
+    _fx_cache.update(fetched=now, data=data)
+    return data
+
+
+@api.get("/fx")
+def fx():
+    try:
+        return jsonify(fetch_fx_rate())
+    except Exception:
+        return error("No pudimos consultar la tasa de cambio.", 502)

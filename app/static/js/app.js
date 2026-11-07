@@ -1,7 +1,16 @@
 (() => {
   const csrf = document.querySelector('meta[name="csrf-token"]').content;
   const $ = (selector) => document.querySelector(selector);
-  const money = (value) => `${value < 0 ? '-$' : '$'}${new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.abs(value))}`;
+  const nf0 = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 });
+  const nf2 = new Intl.NumberFormat('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const money = (value) => `${value < 0 ? '-$' : '$'}${nf0.format(Math.abs(Math.round(value)))}`;
+  // Cifras cortas para ejes: $500 mil · $1,2 M
+  const short = (value) => {
+    const abs = Math.abs(value), sign = value < 0 ? '-' : '';
+    if (abs >= 1e6) return `${sign}$${new Intl.NumberFormat('es-CO', { maximumFractionDigits: 1 }).format(abs / 1e6)} M`;
+    if (abs >= 1e3) return `${sign}$${nf0.format(abs / 1e3)} mil`;
+    return `${sign}$${nf0.format(abs)}`;
+  };
   const dateLabel = (iso, options = { day: '2-digit', month: 'short', year: 'numeric' }) =>
     new Intl.DateTimeFormat('es-CO', options).format(new Date(`${iso}T12:00:00`));
   const displayDate = (iso) => /^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '';
@@ -15,7 +24,15 @@
     return `${yearText}-${monthText}-${dayText}`;
   }
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let expenses = [], categories = [], settings = {}, categoryChart, dailyChart, toastTimer, saving = false;
+  const store = {
+    get(key) { try { return JSON.parse(localStorage.getItem(key)); } catch (_) { return null; } },
+    set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) { /* sin almacenamiento */ } },
+    del(key) { try { localStorage.removeItem(key); } catch (_) { /* sin almacenamiento */ } },
+  };
+
+  let expenses = [], categories = [], settings = {}, summary = null;
+  let categoryChart, dailyChart, toastTimer, saving = false, freshId = null, shownRemaining = null;
+  let currentView = 'expenses';
 
   async function api(path, options = {}) {
     const response = await fetch(path, {
@@ -32,12 +49,13 @@
     return data;
   }
 
-  function toast(message) {
+  function toast(message, isError = false) {
     const element = $('#toast');
     element.textContent = message;
+    element.classList.toggle('error', isError);
     element.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => element.classList.remove('show'), 2400);
+    toastTimer = setTimeout(() => element.classList.remove('show'), 2600);
   }
 
   function feedback(element, message, isError = false) {
@@ -52,16 +70,19 @@
   }
 
   async function loadAll() {
-    const [summary, categoryResponse, expenseResponse] = await Promise.all([
-      api('/api/settings'), api('/api/categories'), api('/api/expenses'),
+    const [settingsResponse, categoryResponse, expenseResponse, summaryResponse] = await Promise.all([
+      api('/api/settings'), api('/api/categories'), api('/api/expenses'), api('/api/summary'),
     ]);
-    settings = summary;
+    settings = settingsResponse;
     categories = categoryResponse.categories;
     expenses = expenseResponse.expenses;
+    summary = summaryResponse;
     renderCategories();
     renderExpenses();
     renderFinancials();
     renderSettings();
+    refreshFx();
+    if (currentView === 'summary') drawCharts();
   }
 
   function renderCategories() {
@@ -73,6 +94,10 @@
     }
   }
 
+  /* ---------- Historial ---------- */
+  const iconEdit = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>';
+  const iconTrash = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7h15M10 7V4.5h4V7M6.5 7l.8 12.5h9.4L17.5 7M10 11v5M14 11v5"/></svg>';
+
   function renderExpenses() {
     const root = $('#expense-list');
     const filterText = $('#expense-filter-text').value.trim();
@@ -83,180 +108,280 @@
       ? a.date.localeCompare(b.date) || a.id - b.id
       : b.date.localeCompare(a.date) || b.id - a.id);
     const count = expenses.length;
-    $('#history-count').textContent = `${count} ${count === 1 ? 'registro' : 'registros'}`;
+    $('#history-count').textContent = `${count} ${count === 1 ? 'movimiento' : 'movimientos'}`;
     $('#clear-date-filter').hidden = !filterText;
 
     if (filterText && !chosenDate) {
-      $('#filter-status').textContent = 'Escribe una fecha válida en formato DD/MM/AAAA.';
+      $('#filter-status').textContent = 'Escribe una fecha válida: DD/MM/AAAA.';
     } else if (chosenDate) {
-      const visibleCount = filtered.length;
-      const visibleText = visibleCount === 1 ? '1 gasto' : `${visibleCount} gastos`;
-      $('#filter-status').textContent = `${visibleText} del ${dateLabel(chosenDate)} · los totales de arriba incluyen todo el viaje.`;
+      const dayTotal = filtered.reduce((sum, item) => sum + item.amount, 0);
+      const visibleText = filtered.length === 1 ? '1 gasto' : `${filtered.length} gastos`;
+      $('#filter-status').textContent = `${visibleText} el ${dateLabel(chosenDate, { day: 'numeric', month: 'long' })} · total del día ${money(dayTotal)}. Tu presupuesto sigue contando todo el viaje.`;
     } else {
-      $('#filter-status').textContent = count
-        ? 'Tus totales siempre incluyen todos los gastos.'
-        : 'Aquí aparecerán tus gastos cuando registres el primero.';
+      $('#filter-status').textContent = count ? '' : 'Aquí aparecerán tus gastos cuando registres el primero.';
     }
 
     if (!sorted.length) {
       const message = chosenDate
         ? `No hay gastos para el ${dateLabel(chosenDate)}.`
-        : 'Registra el primero en el formulario de arriba.';
+        : 'Registra el primero en el formulario.';
       root.innerHTML = `<div class="empty-state"><strong>${chosenDate ? 'Sin gastos ese día' : 'Aún no hay gastos'}</strong>${message}</div>`;
       return;
     }
 
-    const groups = new Map();
-    sorted.forEach((expense) => {
-      if (!groups.has(expense.date)) groups.set(expense.date, []);
-      groups.get(expense.date).push(expense);
-    });
-    root.innerHTML = [...groups.entries()].map(([day, items]) => `
-      <section class="expense-day" aria-label="Gastos del ${dateLabel(day)}">
-        <div class="day-heading"><span>${dateLabel(day, { weekday: 'short', day: '2-digit', month: 'long' })}</span><strong>Total del día · ${money(items.reduce((sum, item) => sum + item.amount, 0))}</strong></div>
-        ${items.map((expense) => `
-          <article class="expense-row">
-            <span class="expense-date">${dateLabel(expense.date)}</span>
-            <span class="expense-description">${escapeHtml(expense.description || 'Gasto')}</span>
-            <span class="expense-category">${escapeHtml(expense.category)}</span>
-            <strong class="expense-amount">${money(expense.amount)}</strong>
-            <span class="row-actions">
-              <button class="text-action" data-edit="${expense.id}" type="button" aria-label="Editar ${escapeHtml(expense.description || 'gasto')}">Editar</button>
-              <button class="text-action delete" data-delete="${expense.id}" type="button" aria-label="Borrar ${escapeHtml(expense.description || 'gasto')}">Borrar</button>
-            </span>
-          </article>`).join('')}
-      </section>`).join('');
+    root.innerHTML = sorted.map((expense) => {
+      const name = escapeHtml(expense.description || 'Gasto');
+      return `
+        <article class="expense-row${expense.id === freshId ? ' fresh' : ''}">
+          <span class="expense-date">${dateLabel(expense.date, { day: '2-digit', month: 'short' })}</span>
+          <span class="expense-description" title="${name}">${name}</span>
+          <span class="expense-category">${escapeHtml(expense.category)}</span>
+          <strong class="expense-amount">${money(expense.amount)}</strong>
+          <span class="row-actions">
+            <button class="icon-action" data-edit="${expense.id}" type="button" aria-label="Editar ${name}" title="Editar">${iconEdit}</button>
+            <button class="icon-action delete" data-delete="${expense.id}" type="button" aria-label="Borrar ${name}" title="Borrar">${iconTrash}</button>
+          </span>
+        </article>`;
+    }).join('');
+    freshId = null;
   }
 
-  function renderFinancials() {
-    const total = expenses.reduce((sum, expense) => sum + expense.amount, 0);
-    const remaining = settings.initial_budget - total;
-    $('#budget-value').textContent = money(settings.initial_budget);
-    $('#spent-value').textContent = money(total);
-    $('#remaining-value').textContent = money(remaining);
-    $('.budget-strip').classList.toggle('over-budget', remaining < 0);
-    $('#trip-length').textContent = `${tripDays()} ${tripDays() === 1 ? 'día' : 'días'} de viaje`;
-    $('#spent-note').textContent = `${expenses.length} ${expenses.length === 1 ? 'gasto registrado' : 'gastos registrados'}`;
-    $('#remaining-note').textContent = remaining < 0 ? 'Presupuesto superado' : 'Disponible para el resto del viaje';
-    $('#trip-dates').textContent = `${dateLabel(settings.trip_start, { day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase()} — ${dateLabel(settings.trip_end, { day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase()}`;
-    renderCharts();
+  /* ---------- Cifras principales ---------- */
+  function animateNumber(element, from, to) {
+    if (reducedMotion || from === null || from === to) { element.textContent = money(to); return; }
+    const start = performance.now(), duration = 650;
+    const tick = (now) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      element.textContent = money(from + (to - from) * eased);
+      if (t < 1) requestAnimationFrame(tick); else element.textContent = money(to);
+    };
+    requestAnimationFrame(tick);
   }
+
+  const percentText = (value) => `${new Intl.NumberFormat('es-CO', { maximumFractionDigits: 1 }).format(value)} %`;
 
   function tripDays() {
     return Math.round((new Date(`${settings.trip_end}T12:00:00`) - new Date(`${settings.trip_start}T12:00:00`)) / 86400000) + 1;
   }
 
+  function todayIso() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: settings.timezone || 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+  }
+
+  function renderFinancials() {
+    const total = expenses.reduce((sum, expense) => sum + expense.amount, 0);
+    const remaining = settings.initial_budget - total;
+    const over = remaining < 0;
+    animateNumber($('#remaining-value'), shownRemaining, remaining);
+    if (shownRemaining !== null && shownRemaining !== remaining && !reducedMotion) {
+      const amount = $('#remaining-value');
+      amount.classList.remove('bump'); void amount.offsetWidth; amount.classList.add('bump');
+    }
+    shownRemaining = remaining;
+    $('#budget-value').textContent = money(settings.initial_budget);
+    $('#spent-value').textContent = money(total);
+    $('#balance-card').classList.toggle('over-budget', over);
+    $('#remaining-note').textContent = over ? 'Presupuesto superado' : 'Disponible para el resto del viaje';
+    const pct = settings.initial_budget ? (total / settings.initial_budget) * 100 : 0;
+    $('#percent-hero').textContent = `${percentText(Math.round(pct * 10) / 10)} usado`;
+    const bounded = Math.min(100, Math.max(0, pct));
+    $('#hero-meter-fill').style.width = `${bounded}%`;
+    $('#hero-meter-fill').classList.toggle('over', over);
+    $('#hero-meter').setAttribute('aria-valuenow', String(Math.round(bounded)));
+
+    // Saludo y fechas
+    $('#greeting-sub').textContent = over ? 'Ya superaste tu presupuesto.' : total === 0 ? 'Aún no registras gastos.' : 'Así va tu presupuesto.';
+    const today = todayIso();
+    const dayIndex = today >= settings.trip_start && today <= settings.trip_end
+      ? Math.round((new Date(`${today}T12:00:00`) - new Date(`${settings.trip_start}T12:00:00`)) / 86400000) + 1 : null;
+    const range = `${dateLabel(settings.trip_start, { day: 'numeric', month: 'short' })} – ${dateLabel(settings.trip_end, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+    $('#trip-dates-text').textContent = range;
+    $('#trip-day').textContent = dayIndex ? ` · día ${dayIndex} de ${tripDays()}` : '';
+
+    if (summary) {
+      $('#today-daily').textContent = money(summary.recommended_daily);
+      $('#today-daily-note').textContent = summary.remaining_days ? `al día · ${summary.remaining_days} ${summary.remaining_days === 1 ? 'día' : 'días'}` : 'el viaje terminó';
+      $('#days-left').textContent = String(summary.remaining_days);
+      $('#days-left-note').textContent = `hasta el ${dateLabel(settings.trip_end, { day: 'numeric', month: 'short' })}`;
+      renderMiniCategories();
+      renderSummaryPanel();
+    }
+    renderRemainingEur();
+  }
+
+  function renderMiniCategories() {
+    const root = $('#mini-cats');
+    const list = summary.categories.slice(0, 6);
+    if (!list.length) { root.innerHTML = '<p class="mini-empty">Cuando registres gastos, aquí verás las categorías con más gasto.</p>'; return; }
+    const max = list[0].amount;
+    root.innerHTML = list.map((item) => `
+      <div class="mini-cat"><span class="mini-cat-name">${escapeHtml(item.name)}</span><span class="mini-cat-amount">${money(item.amount)}</span>
+      <span class="mini-cat-bar" aria-hidden="true"><span style="width:${Math.max(3, (item.amount / max) * 100)}%"></span></span></div>`).join('');
+  }
+
+  function renderSummaryPanel() {
+    const data = summary;
+    $('#kpi-remaining').textContent = money(data.remaining);
+    $('#kpi-remaining').closest('.kpi').classList.toggle('negative', data.remaining < 0);
+    $('#kpi-spent').textContent = money(data.total_spent);
+    $('#kpi-daily').textContent = data.warning ? '$0' : money(data.recommended_daily);
+    $('#recommendation').textContent = data.warning
+      ? 'Presupuesto agotado.'
+      : data.remaining_days ? `durante ${data.remaining_days} ${data.remaining_days === 1 ? 'día' : 'días'} restantes` : 'El viaje ya terminó.';
+    const top = data.categories[0];
+    $('#kpi-top').textContent = top ? top.name : 'Sin gastos';
+    $('#kpi-top-amount').textContent = top ? `${money(top.amount)} · ${percentText(Math.round(top.amount / data.total_spent * 1000) / 10)}` : 'Aún sin gastos';
+    $('#percent-value').textContent = percentText(data.percent_used);
+    const progress = Math.min(100, Math.max(0, data.percent_used));
+    $('#progress-fill').style.width = `${progress}%`;
+    $('#progress-fill').classList.toggle('over', data.remaining < 0);
+    $('#summary-meter').setAttribute('aria-valuenow', String(Math.round(progress)));
+    $('#legend-spent').textContent = money(data.total_spent);
+    $('#legend-remaining').textContent = money(data.remaining);
+    $('#plan-daily').textContent = money(data.original_daily);
+    $('#budget-warning').classList.toggle('hidden', !data.warning);
+    $('#budget-warning').textContent = data.warning || '';
+  }
+
+  /* ---------- Gráficos ---------- */
+  const tooltipStyle = {
+    backgroundColor: '#2a2060', titleColor: '#ffffff', bodyColor: '#e9e6ff', padding: 11, cornerRadius: 10,
+    titleFont: { weight: '700', size: 13 }, bodyFont: { size: 13 }, boxPadding: 4, caretSize: 6, displayColors: false,
+  };
+
   const amountLabels = {
     id: 'amountLabels',
-    afterDatasetsDraw(chart) {
+    afterDatasetsDraw(chart, _args, opts) {
+      const meta = chart.getDatasetMeta(0);
       const dataset = chart.data.datasets[0];
-      if (!dataset || chart.getDatasetMeta(0).hidden) return;
-      const context = chart.ctx;
-      const points = chart.getDatasetMeta(0).data;
-      context.save();
-      context.font = '600 11px system-ui, sans-serif';
-      context.textBaseline = 'middle';
-      points.forEach((point, index) => {
-        const label = money(dataset.data[index]);
-        const width = context.measureText(label).width;
-        const right = chart.chartArea.right + 58;
-        const fitsOutside = point.x + width + 9 <= right;
-        context.textAlign = fitsOutside ? 'left' : 'right';
-        context.fillStyle = '#51665d';
-        context.fillText(label, fitsOutside ? point.x + 8 : point.x - 8, point.y);
+      if (!dataset || meta.hidden) return;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.textBaseline = 'middle';
+      meta.data.forEach((bar, index) => {
+        const value = dataset.data[index];
+        const pct = opts.total ? Math.round((value / opts.total) * 100) : 0;
+        const amountText = money(value), pctText = `  ${pct}%`;
+        ctx.font = '700 12px "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif';
+        const w1 = ctx.measureText(amountText).width;
+        ctx.font = '600 12px "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif';
+        const w2 = ctx.measureText(pctText).width;
+        const inside = bar.x - bar.base > w1 + w2 + 22;
+        const x = inside ? bar.x - 10 - (w1 + w2) : bar.x + 8;
+        ctx.textAlign = 'left';
+        ctx.fillStyle = inside ? '#ffffff' : '#281d73';
+        ctx.font = '700 12px "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif';
+        ctx.fillText(amountText, x, bar.y);
+        ctx.fillStyle = inside ? 'rgba(255,255,255,.85)' : '#5f5a80';
+        ctx.font = '600 12px "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif';
+        ctx.fillText(pctText, x + w1, bar.y);
       });
-      context.restore();
+      ctx.restore();
     },
   };
 
-  function renderCharts() {
-    if (!window.Chart) return;
-    api('/api/summary').then((data) => {
-      $('#percent-value').textContent = `${new Intl.NumberFormat('es-CO', { maximumFractionDigits: 1 }).format(data.percent_used)} %`;
-      $('#recommendation').textContent = data.warning
-        ? 'Presupuesto agotado: no hay más gasto recomendado.'
-        : data.remaining_days
-          ? `Puedes gastar ${money(data.recommended_daily)} al día durante ${data.remaining_days} ${data.remaining_days === 1 ? 'día' : 'días'}.`
-          : 'El viaje terminó; ya no quedan días.';
-      $('#original-daily').textContent = `Referencia inicial: ${money(data.original_daily)} al día`;
-      const progress = Math.min(100, Math.max(0, data.percent_used));
-      $('#progress-fill').style.width = `${progress}%`;
-      $('#progress-fill').classList.toggle('over', data.remaining < 0);
-      $('.progress-track').setAttribute('aria-valuenow', String(progress));
-      $('#legend-spent').textContent = money(data.total_spent);
-      $('#legend-remaining').textContent = money(data.remaining);
-      $('#budget-warning').classList.toggle('hidden', !data.warning);
-      $('#budget-warning').textContent = data.warning || '';
-      const top = data.categories[0];
-      $('#top-category').hidden = !top;
-      $('#top-category').textContent = top ? `Mayor gasto · ${top.name} · ${money(top.amount)}` : '';
-      $('#category-empty').classList.toggle('hidden', data.categories.length > 0);
-      $('#daily-empty').classList.toggle('hidden', data.total_spent > 0);
+  function drawCharts() {
+    if (!window.Chart || !summary) return;
+    const data = summary;
+    Chart.defaults.font.family = '"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif';
+    Chart.defaults.color = '#5f5a80';
+    if (categoryChart) categoryChart.destroy();
+    if (dailyChart) dailyChart.destroy();
+    categoryChart = dailyChart = null;
+    const categoryCanvas = $('#category-chart'), dailyCanvas = $('#daily-chart');
+    const hasData = data.total_spent > 0 && data.categories.length > 0;
+    $('#category-empty').classList.toggle('hidden', hasData);
+    $('#daily-empty').classList.toggle('hidden', hasData);
+    categoryCanvas.hidden = dailyCanvas.hidden = !hasData;
+    if (!hasData) return;
 
-      if (categoryChart) categoryChart.destroy();
-      if (dailyChart) dailyChart.destroy();
-      const categoryCanvas = $('#category-chart');
-      const dailyCanvas = $('#daily-chart');
-      categoryCanvas.hidden = data.categories.length === 0;
-      dailyCanvas.hidden = data.total_spent === 0;
-      if (!data.categories.length || data.total_spent === 0) return;
+    const animation = reducedMotion ? false : { duration: 700, easing: 'easeOutCubic' };
+    const total = data.total_spent;
+    categoryChart = new Chart(categoryCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: data.categories.map((item) => item.name),
+        datasets: [{
+          data: data.categories.map((item) => item.amount),
+          backgroundColor: data.categories.map((_, index) => index === 0 ? '#c0572d' : '#ebae8c'),
+          hoverBackgroundColor: data.categories.map((_, index) => index === 0 ? '#a24520' : '#e0976f'),
+          borderRadius: 7, borderSkipped: false, maxBarThickness: 30, categoryPercentage: .82, barPercentage: .92,
+        }],
+      },
+      plugins: [amountLabels],
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation,
+        layout: { padding: { right: 8 } },
+        plugins: {
+          legend: { display: false }, amountLabels: { total },
+          tooltip: {
+            ...tooltipStyle,
+            callbacks: {
+              title: (items) => items[0].label,
+              label: (item) => `${money(item.raw)} · ${Math.round(item.raw / total * 100)} % del gasto`,
+            },
+          },
+        },
+        scales: {
+          x: { beginAtZero: true, grace: '4%', grid: { color: 'rgba(95, 90, 128, .12)' }, border: { display: false }, ticks: { callback: (value) => short(value), maxTicksLimit: 4, font: { size: 12 } } },
+          y: { grid: { display: false }, border: { display: false }, ticks: { color: '#281d73', font: { size: 13, weight: '600' } } },
+        },
+      },
+    });
 
-      const animation = reducedMotion ? false : { duration: 180 };
-      categoryChart = new Chart(categoryCanvas.getContext('2d'), {
-        type: 'bar',
-        data: {
-          labels: data.categories.map((item) => item.name),
-          datasets: [{
-            data: data.categories.map((item) => item.amount),
-            backgroundColor: data.categories.map((_, index) => index === 0 ? '#246c54' : '#a9c4b5'),
-            borderRadius: 5, borderSkipped: false, maxBarThickness: 27,
-          }],
-        },
-        plugins: [amountLabels],
-        options: {
-          indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation,
-          layout: { padding: { right: 62 } },
-          plugins: {
-            legend: { display: false },
-            tooltip: { callbacks: { label: (item) => ` ${money(item.raw)}` } },
-          },
-          scales: {
-            x: { beginAtZero: true, grace: '18%', grid: { color: '#e9eee9' }, border: { display: false }, ticks: { callback: (value) => money(value), maxTicksLimit: 4, font: { size: 10 } } },
-            y: { grid: { display: false }, border: { display: false }, ticks: { color: '#43564d', font: { size: 11, weight: '500' } } },
-          },
-        },
-      });
-
-      const reference = Array(data.daily.length).fill(data.original_daily);
-      dailyChart = new Chart(dailyCanvas.getContext('2d'), {
-        type: 'bar',
-        data: {
-          labels: data.daily.map((item) => dateLabel(item.date, { day: '2-digit', month: 'short' })),
-          datasets: [
-            { label: 'Gasto del día', data: data.daily.map((item) => item.amount), backgroundColor: '#6caa8b', hoverBackgroundColor: '#246c54', borderRadius: 4, borderSkipped: false, maxBarThickness: 26, order: 2 },
-            { type: 'line', label: 'Presupuesto diario', data: reference, borderColor: '#bd8652', borderDash: [5, 4], borderWidth: 2, pointRadius: 0, pointHitRadius: 8, tension: 0, order: 1 },
-          ],
-        },
-        options: {
-          responsive: true, maintainAspectRatio: false, animation,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: { display: false },
-            tooltip: { callbacks: { label: (item) => ` ${item.dataset.label}: ${money(item.raw)}` } },
-          },
-          scales: {
-            x: { grid: { display: false }, border: { display: false }, ticks: { color: '#718078', font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
-            y: { beginAtZero: true, grid: { color: '#e9eee9' }, border: { display: false }, ticks: { callback: (value) => money(value), maxTicksLimit: 4, font: { size: 10 } } },
+    const plan = data.original_daily;
+    const planLine = {
+      id: 'planLine',
+      afterDatasetsDraw(chart) {
+        const { ctx, chartArea, scales } = chart;
+        if (!chartArea || plan > scales.y.max) return;
+        const y = scales.y.getPixelForValue(plan);
+        ctx.save();
+        ctx.beginPath(); ctx.setLineDash([6, 5]); ctx.lineWidth = 2; ctx.strokeStyle = '#a8731f';
+        ctx.moveTo(chartArea.left, y); ctx.lineTo(chartArea.right, y); ctx.stroke();
+        ctx.restore();
+      },
+    };
+    dailyChart = new Chart(dailyCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: data.daily.map((item) => dateLabel(item.date, { day: 'numeric', month: 'short' })),
+        datasets: [{
+          label: 'Gasto del día', data: data.daily.map((item) => item.amount),
+          backgroundColor: data.daily.map((item) => item.amount > plan ? '#c0572d' : '#9381ff'),
+          hoverBackgroundColor: data.daily.map((item) => item.amount > plan ? '#a24520' : '#6f5cf0'),
+          borderRadius: 7, borderSkipped: false, maxBarThickness: 40, categoryPercentage: .78, barPercentage: .9,
+        }],
+      },
+      plugins: [planLine],
+      options: {
+        responsive: true, maintainAspectRatio: false, animation,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            ...tooltipStyle,
+            callbacks: {
+              title: (items) => dateLabel(data.daily[items[0].dataIndex].date, { weekday: 'long', day: 'numeric', month: 'long' }),
+              label: (item) => `Gastado: ${money(item.raw)}`,
+              afterLabel: (item) => {
+                const diff = item.raw - plan;
+                return [`Plan diario: ${money(plan)}`, diff > 0 ? `${money(diff)} por encima del plan` : diff < 0 ? `${money(-diff)} por debajo del plan` : 'Justo en el plan'];
+              },
+            },
           },
         },
-      });
-    }).catch((error) => {
-      $('#category-empty').classList.remove('hidden');
-      $('#category-empty').textContent = 'No pudimos cargar los gráficos. Actualiza la página para intentarlo de nuevo.';
-      console.error(error);
+        scales: {
+          x: { grid: { display: false }, border: { display: false }, ticks: { color: '#5f5a80', font: { size: 12 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
+          y: { beginAtZero: true, suggestedMax: plan * 1.15, grid: { color: 'rgba(95, 90, 128, .12)' }, border: { display: false }, ticks: { callback: (value) => short(value), maxTicksLimit: 5, font: { size: 12 } } },
+        },
+      },
     });
   }
 
+  /* ---------- Configuración ---------- */
   function renderSettings() {
     $('#setting-budget').value = settings.initial_budget;
     $('#setting-start').value = settings.trip_start;
@@ -265,21 +390,39 @@
       <li><span>${escapeHtml(category.name)}</span><button type="button" data-rename="${category.id}" data-name="${escapeHtml(category.name)}">Cambiar nombre</button></li>`).join('');
   }
 
+  /* ---------- Formulario ---------- */
   function defaultDate() {
-    const today = new Intl.DateTimeFormat('en-CA', {
-      timeZone: settings.timezone || 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(new Date());
+    const today = todayIso();
     return today >= settings.trip_start && today <= settings.trip_end ? today : settings.trip_start;
+  }
+
+  function clearInvalid() {
+    document.querySelectorAll('#expense-form .field.invalid').forEach((field) => field.classList.remove('invalid'));
+    document.querySelectorAll('#expense-form [aria-invalid]').forEach((input) => input.removeAttribute('aria-invalid'));
+  }
+
+  function markInvalid(input, message) {
+    clearInvalid();
+    input.closest('.field').classList.add('invalid');
+    input.setAttribute('aria-invalid', 'true');
+    feedback($('#expense-feedback'), message, true);
+    input.focus();
+  }
+
+  function setSaveLabel(text, symbol) {
+    $('#save-expense .save-label').textContent = text;
+    if (symbol) $('#save-expense .save-symbol').textContent = symbol;
   }
 
   function resetExpenseForm() {
     $('#expense-form').reset();
     $('#expense-id').value = '';
+    clearInvalid();
     setExpenseDate(defaultDate());
     $('#entry-title').textContent = 'Agregar un gasto';
-    $('#save-expense').querySelector('span:last-child').textContent = 'Guardar gasto';
-    $('#save-expense').querySelector('.save-symbol').textContent = '＋';
+    setSaveLabel('Guardar gasto', '＋');
     $('#cancel-edit').classList.add('hidden');
+    updateAmountHint();
   }
 
   function setExpenseDate(iso) {
@@ -294,84 +437,101 @@
     else { picker.focus(); picker.click(); }
   }
 
+  function updateAmountHint() {
+    const hint = $('#amount-hint');
+    const value = Number($('#expense-amount').value);
+    if (!value || value < 1) { hint.textContent = 'Escribe el valor en pesos, sin puntos.'; return; }
+    const eur = fx.active ? ` · ≈ ${nf2.format(value / fx.active.rate)} EUR` : '';
+    hint.textContent = `${money(value)} COP${eur}`;
+  }
+
   $('#expense-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     if (saving) return;
     const id = $('#expense-id').value;
     const saveButton = $('#save-expense');
+    clearInvalid();
+    feedback($('#expense-feedback'), '');
     const expenseDate = parseDisplayDate($('#expense-date-text').value);
-    if (!expenseDate) {
-      $('#expense-date-text').setCustomValidity('Escribe una fecha real en formato DD/MM/AAAA.');
-      $('#expense-date-text').reportValidity();
-      return;
+    if (!expenseDate) return markInvalid($('#expense-date-text'), 'Escribe una fecha real, con el formato DD/MM/AAAA.');
+    if (!$('#expense-category').value) return markInvalid($('#expense-category'), 'Elige una categoría.');
+    const amountText = $('#expense-amount').value.trim();
+    if (!/^[0-9]{1,12}$/.test(amountText) || Number(amountText) < 1) {
+      return markInvalid($('#expense-amount'), 'Escribe el valor en pesos: un número entero mayor que cero, sin puntos ni comas.');
     }
-    $('#expense-date-text').setCustomValidity('');
     const formData = {
       date: expenseDate,
       description: $('#expense-description').value,
       category_id: Number($('#expense-category').value),
-      amount: $('#expense-amount').value,
+      amount: amountText,
     };
     saving = true;
     saveButton.disabled = true;
-    saveButton.querySelector('span:last-child').textContent = id ? 'Guardando…' : 'Guardando…';
-    feedback($('#expense-feedback'), '');
+    setSaveLabel('Guardando…');
     try {
-      if (id) await api(`/api/expenses/${id}`, { method: 'PUT', body: JSON.stringify(formData) });
-      else await api('/api/expenses', { method: 'POST', body: JSON.stringify(formData) });
+      let result;
+      if (id) result = await api(`/api/expenses/${id}`, { method: 'PUT', body: JSON.stringify(formData) });
+      else result = await api('/api/expenses', { method: 'POST', body: JSON.stringify(formData) });
+      freshId = id ? Number(id) : result.id;
       await loadAll();
       resetExpenseForm();
       feedback($('#expense-feedback'), id ? 'Gasto actualizado.' : 'Gasto guardado.');
       toast(id ? 'Gasto actualizado' : 'Gasto guardado');
+      saveButton.classList.add('saved');
+      setSaveLabel('¡Guardado!', '✓');
+      setTimeout(() => {
+        saveButton.classList.remove('saved');
+        if (!$('#expense-id').value) setSaveLabel('Guardar gasto', '＋');
+      }, 1400);
+      $('#expense-description').focus({ preventScroll: true });
     } catch (error) {
       feedback($('#expense-feedback'), error.message, true);
+      setSaveLabel(id ? 'Guardar cambios' : 'Guardar gasto');
     } finally {
       saving = false;
       saveButton.disabled = false;
-      if (!$('#expense-id').value) saveButton.querySelector('span:last-child').textContent = 'Guardar gasto';
     }
   });
 
-  $('#cancel-edit').addEventListener('click', resetExpenseForm);
+  $('#expense-amount').addEventListener('input', () => { clearInvalid(); updateAmountHint(); });
+  ['#expense-description', '#expense-category', '#expense-date-text'].forEach((selector) => $(selector).addEventListener('input', clearInvalid));
+  $('#cancel-edit').addEventListener('click', () => { resetExpenseForm(); feedback($('#expense-feedback'), ''); });
   $('#expense-list').addEventListener('click', async (event) => {
     const editButton = event.target.closest('[data-edit]');
     const deleteButton = event.target.closest('[data-delete]');
     if (editButton) {
       const expense = expenses.find((item) => item.id === Number(editButton.dataset.edit));
       if (!expense) return;
+      clearInvalid();
       $('#expense-id').value = expense.id;
       setExpenseDate(expense.date);
       $('#expense-description').value = expense.description;
       $('#expense-category').value = expense.category_id;
       $('#expense-amount').value = expense.amount;
       $('#entry-title').textContent = 'Editar gasto';
-      $('#save-expense').querySelector('span:last-child').textContent = 'Guardar cambios';
-      $('#save-expense').querySelector('.save-symbol').textContent = '✓';
+      setSaveLabel('Guardar cambios', '✓');
       $('#cancel-edit').classList.remove('hidden');
-      $('#history-details').open = true;
-      $('#expense-date-text').focus();
-      window.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
+      updateAmountHint();
+      feedback($('#expense-feedback'), '');
+      $('#expense-form').scrollIntoView({ block: 'center', behavior: reducedMotion ? 'auto' : 'smooth' });
+      $('#expense-amount').focus({ preventScroll: true });
     }
     if (deleteButton && confirm('¿Quieres borrar este gasto? Esta acción no se puede deshacer.')) {
       try {
         await api(`/api/expenses/${deleteButton.dataset.delete}`, { method: 'DELETE' });
+        if ($('#expense-id').value === deleteButton.dataset.delete) resetExpenseForm();
         await loadAll();
         toast('Gasto eliminado');
       } catch (error) {
-        toast(error.message);
+        toast(error.message, true);
       }
     }
   });
 
   $('#expense-date-text').addEventListener('input', () => $('#expense-date-text').setCustomValidity(''));
-  $('#expense-date-text').addEventListener('blur', () => {
-    const text = $('#expense-date-text').value.trim();
-    $('#expense-date-text').setCustomValidity(text && !parseDisplayDate(text) ? 'Usa una fecha real en formato DD/MM/AAAA.' : '');
-  });
   $('#open-expense-date').addEventListener('click', () => openDatePicker('#expense-date-picker'));
-  $('#expense-date-picker').addEventListener('change', () => setExpenseDate($('#expense-date-picker').value));
+  $('#expense-date-picker').addEventListener('change', () => { if ($('#expense-date-picker').value) setExpenseDate($('#expense-date-picker').value); });
   $('#expense-filter-text').addEventListener('input', renderExpenses);
-  $('#expense-filter-text').addEventListener('change', renderExpenses);
   $('#open-filter-date').addEventListener('click', () => openDatePicker('#expense-filter-picker'));
   $('#expense-filter-picker').addEventListener('change', () => {
     $('#expense-filter-text').value = displayDate($('#expense-filter-picker').value);
@@ -384,24 +544,25 @@
   });
   $('#sort-order').addEventListener('change', renderExpenses);
   $('#history-details').addEventListener('toggle', () => {
-    $('#history-toggle-label').textContent = $('#history-details').open ? 'Ocultar gastos' : 'Ver gastos';
+    const open = $('#history-details').open;
+    $('#history-toggle-label').textContent = open ? 'Ocultar' : 'Ver gastos';
+    if (open) setTimeout(() => $('#history-details').scrollIntoView({ block: 'end', behavior: reducedMotion ? 'auto' : 'smooth' }), 60);
   });
 
-  document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => {
-    const summary = button.dataset.view === 'summary';
-    $('#expenses-view').classList.toggle('hidden', summary);
-    $('#summary-view').classList.toggle('hidden', !summary);
-    $('#view-title').textContent = summary ? 'Resumen del viaje' : 'Gastos del viaje';
-    document.querySelectorAll('[data-view]').forEach((item) => {
-      const selected = item === button;
+  /* ---------- Vistas ---------- */
+  function showView(name) {
+    const isSummary = name === 'summary';
+    currentView = name;
+    $('#expenses-view').classList.toggle('hidden', isSummary);
+    $('#summary-view').classList.toggle('hidden', !isSummary);
+    document.querySelectorAll('.nav-link').forEach((item) => {
+      const selected = item.dataset.view === name;
       item.classList.toggle('selected', selected);
       item.setAttribute('aria-pressed', String(selected));
     });
-    if (summary) {
-      categoryChart?.resize();
-      dailyChart?.resize();
-    }
-  }));
+    if (isSummary) requestAnimationFrame(drawCharts);
+  }
+  document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => showView(button.dataset.view)));
 
   document.querySelectorAll('.settings-open').forEach((button) => button.addEventListener('click', () => $('#settings-dialog').showModal()));
   $('#settings-form').addEventListener('submit', async (event) => {
@@ -445,5 +606,142 @@
     }
   });
 
-  loadAll().then(resetExpenseForm).catch((error) => toast(error.message));
+  /* ============================================================
+     Conversor EUR ⇄ COP — informativo. Vive solo en el navegador:
+     no toca la base de datos ni los cálculos del presupuesto.
+     ============================================================ */
+  const FX_KEY = 'fx-eurcop-v1';
+  const fx = { live: null, manual: null, active: null, direction: 'eur-cop', liveFailed: false };
+  const saved = store.get(FX_KEY) || {};
+  if (saved.live && saved.live.rate > 0 && saved.live.ts) fx.live = { ...saved.live, fromCache: true };
+  if (saved.manual && saved.manual.rate > 0 && saved.manual.ts) fx.manual = saved.manual;
+  if (saved.direction === 'cop-eur') fx.direction = 'cop-eur';
+
+  // Acepta "3638,91", "3.638,91", "3638.91", "1.250" (miles) y "50".
+  function parseNumber(text) {
+    let value = String(text).replace(/[\s$€]/g, '');
+    if (!value || !/^[0-9.,]+$/.test(value)) return NaN;
+    const commas = (value.match(/,/g) || []).length, dots = (value.match(/\./g) || []).length;
+    if (commas && dots) {
+      const decimalSeparator = value.lastIndexOf(',') > value.lastIndexOf('.') ? ',' : '.';
+      const thousandsSeparator = decimalSeparator === ',' ? '.' : ',';
+      value = value.split(thousandsSeparator).join('').replace(decimalSeparator, '.');
+    } else if (commas) {
+      if (commas > 1) return NaN;
+      value = value.replace(',', '.');
+    } else if (dots) {
+      const after = value.split('.').pop();
+      if (dots > 1 || after.length === 3) value = value.replace(/\./g, '');
+    }
+    const number = Number(value);
+    return Number.isFinite(number) ? number : NaN;
+  }
+
+  const fxStamp = (iso) => new Intl.DateTimeFormat('es-CO', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit',
+    timeZone: settings.timezone || 'America/Bogota',
+  }).format(new Date(iso));
+
+  function setBadge(text, kind) {
+    const badge = $('#fx-badge');
+    badge.textContent = text;
+    badge.className = `fx-badge ${kind}`;
+  }
+
+  function refreshFx() {
+    fx.active = fx.manual ? { rate: fx.manual.rate, kind: 'manual' } : fx.live ? { rate: fx.live.rate, kind: fx.live.fromCache ? 'cached' : 'live' } : null;
+    const meta = $('#fx-meta');
+    meta.classList.remove('warn');
+    $('#fx-live').hidden = !(fx.manual && fx.live);
+    if (document.activeElement !== $('#fx-rate')) $('#fx-rate').value = fx.active ? nf2.format(fx.active.rate) : '';
+    $('#fx-rate').setAttribute('placeholder', 'Ej. 3.600');
+    if (!fx.active) {
+      setBadge('Sin tasa', 'none');
+      meta.textContent = 'No pudimos obtener la tasa. Escribe una tasa de cambio para poder convertir.';
+      meta.classList.add('warn');
+    } else if (fx.active.kind === 'manual') {
+      setBadge('Tasa manual', 'manual');
+      meta.textContent = `Tasa escrita por ti el ${fxStamp(fx.manual.ts).replace(/\.$/, '')}.${fx.live ? ` En vivo: 1 EUR ≈ ${nf2.format(fx.live.rate)} COP.` : ''}`;
+    } else if (fx.active.kind === 'cached') {
+      setBadge('Guardada · puede estar desactualizada', 'stale');
+      meta.textContent = `No hay conexión con la fuente. Última tasa guardada: ${fxStamp(fx.live.ts).replace(/\.$/, '')} (${fx.live.source}).`;
+      meta.classList.add('warn');
+    } else {
+      setBadge('En vivo', 'live');
+      meta.textContent = `Fuente: ${fx.live.source} · actualizada ${fxStamp(fx.live.ts).replace(/\.$/, '')}.`;
+    }
+    renderConverter();
+    renderRemainingEur();
+    updateAmountHint();
+  }
+
+  function renderConverter() {
+    const eurToCop = fx.direction === 'eur-cop';
+    $('#fx-in-code').textContent = eurToCop ? 'EUR' : 'COP';
+    $('#fx-out-code').textContent = eurToCop ? 'COP' : 'EUR';
+    $('#fx-in-label').textContent = eurToCop ? 'Cantidad en euros' : 'Cantidad en pesos colombianos';
+    const amount = parseNumber($('#fx-amount').value);
+    const out = $('#fx-result');
+    if (!fx.active || !Number.isFinite(amount) || amount < 0 || amount > 1e12) { out.textContent = '—'; out.dataset.value = ''; return; }
+    const result = eurToCop ? amount * fx.active.rate : amount / fx.active.rate;
+    out.dataset.value = String(result);
+    out.textContent = eurToCop ? nf0.format(Math.round(result)) : nf2.format(result);
+  }
+
+  function renderRemainingEur() {
+    const element = $('#remaining-eur');
+    if (!fx.active || shownRemaining === null) { element.hidden = true; return; }
+    element.hidden = false;
+    element.textContent = `≈ ${nf0.format(Math.round(shownRemaining / fx.active.rate))} EUR`;
+  }
+
+  async function fetchLiveRate() {
+    try {
+      const data = await api('/api/fx');
+      if (!(data.rate > 0) || !data.updated) throw new Error('Tasa inválida');
+      fx.live = { rate: data.rate, ts: data.updated, source: data.source };
+      store.set(FX_KEY, { ...(store.get(FX_KEY) || {}), live: fx.live });
+    } catch (_) {
+      fx.liveFailed = true;
+    }
+    refreshFx();
+  }
+
+  $('#fx-amount').addEventListener('input', renderConverter);
+  $('#fx-amount').addEventListener('focus', (event) => event.target.select());
+  $('#fx-swap').addEventListener('click', () => {
+    const previous = Number($('#fx-result').dataset.value);
+    fx.direction = fx.direction === 'eur-cop' ? 'cop-eur' : 'eur-cop';
+    store.set(FX_KEY, { ...(store.get(FX_KEY) || {}), direction: fx.direction });
+    if (Number.isFinite(previous) && previous > 0) {
+      $('#fx-amount').value = fx.direction === 'cop-eur' ? String(Math.round(previous)) : String(Math.round(previous * 100) / 100).replace('.', ',');
+    }
+    const button = $('#fx-swap');
+    button.classList.toggle('turn');
+    renderConverter();
+  });
+  $('#fx-rate').addEventListener('input', () => {
+    const rate = parseNumber($('#fx-rate').value);
+    const valid = Number.isFinite(rate) && rate >= 1 && rate <= 1e6;
+    $('#fx-rate').setAttribute('aria-invalid', valid ? 'false' : 'true');
+    if (!valid) { $('#fx-meta').textContent = 'Escribe una tasa válida: cuántos pesos vale 1 euro.'; $('#fx-meta').classList.add('warn'); return; }
+    fx.manual = { rate, ts: new Date().toISOString() };
+    store.set(FX_KEY, { ...(store.get(FX_KEY) || {}), manual: fx.manual });
+    refreshFx();
+  });
+  $('#fx-rate').addEventListener('blur', refreshFx);
+  $('#fx-live').addEventListener('click', () => {
+    fx.manual = null;
+    const current = store.get(FX_KEY) || {};
+    delete current.manual;
+    store.set(FX_KEY, current);
+    refreshFx();
+    toast('Usando la tasa en vivo');
+  });
+
+  loadAll().then(() => {
+    resetExpenseForm(); fetchLiveRate();
+    // En pantallas amplias y altas sobra espacio: el historial arranca abierto.
+    if (innerWidth >= 1280 && innerHeight >= 800) $('#history-details').open = true;
+  }).catch((error) => toast(error.message, true));
 })();

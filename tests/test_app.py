@@ -36,6 +36,24 @@ class TravelBudgetTests(unittest.TestCase):
     def add_expense(self, amount=125000, day="2026-11-07", category_id=1, description="Almuerzo"):
         return self.api("/api/expenses", "post", json={"date": day, "description": description, "category_id": category_id, "amount": amount})
 
+    def test_fx_requires_login_and_never_touches_expenses(self):
+        from unittest import mock
+        from app import routes
+
+        self.assertEqual(self.client.get("/api/fx").status_code, 401)
+        self.login()
+        self.add_expense(amount=100000)
+        sample = {"rate": 3638.9, "updated": "2026-11-07T00:02:31+00:00", "source": "ExchangeRate-API"}
+        with mock.patch.object(routes, "fetch_fx_rate", return_value=sample):
+            response = self.api("/api/fx")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), sample)
+        with mock.patch.object(routes, "fetch_fx_rate", side_effect=OSError("sin red")):
+            failed = self.api("/api/fx")
+        self.assertEqual(failed.status_code, 502)
+        self.assertIn("tasa", failed.get_json()["error"])
+        self.assertEqual(self.api("/api/summary").get_json()["total_spent"], 100000)
+
     def test_authentication_and_unauthorized_requests(self):
         self.assertEqual(self.client.get("/api/expenses").status_code, 401)
         self.assertEqual(self.client.get("/").status_code, 302)

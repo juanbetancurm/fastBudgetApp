@@ -104,3 +104,7 @@ python -m unittest discover -s tests -v
 3. El saldo actualizado aparece arriba.
 4. Abre **Resumen** para ver las gráficas por categoría y día.
 5. Pulsa **Configuración** para cambiar presupuesto, fechas o categorías.
+
+## Conversor EUR ⇄ COP
+
+El conversor de la pantalla de gastos es informativo: no cambia el presupuesto, los gastos guardados ni la base de datos (todo sigue en COP). La tasa se pide a `GET /api/fx`, que consulta ExchangeRate-API (`open.er-api.com`, sin llave) y guarda el resultado 6 horas en memoria; el navegador no puede consultar la fuente directamente por la política CSP. Si la fuente falla, la pantalla usa la última tasa guardada en el navegador con su fecha y avisa que puede estar desactualizada; si no hay ninguna, pide escribir la tasa a mano. La tasa manual y la última tasa en vivo se guardan solo en `localStorage`.

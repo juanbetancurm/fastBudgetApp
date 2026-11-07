@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f3f1ec">
+  <meta name="theme-color" content="#f8f7ff">
   <meta name="csrf-token" content="{{ csrf_token }}">
   <title>Mi viaje · Presupuesto</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
@@ -14,12 +14,12 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/" aria-label="Mi viaje, inicio">
-      <span class="brand-avatar"><img src="{{ url_for('static', filename='img/mariSprite.png') }}" alt="Avatar de Mari"><span class="avatar-fallback" aria-hidden="true" hidden>M</span></span>
+      <span class="brand-avatar"><img src="{{ url_for('static', filename='img/mariSprite.png') }}" alt="Avatar de María"><span class="avatar-fallback" aria-hidden="true" hidden>M</span></span>
       <span class="brand-name">Mi viaje</span>
     </a>
     <nav class="main-nav" aria-label="Navegación principal">
       <button class="nav-link selected" type="button" data-view="expenses" aria-pressed="true">Gastos</button>
-      <button class="nav-link" type="button" data-view="summary" aria-pressed="false">Resumen</button>
+      <button class="nav-link" type="button" data-view="summary" aria-pressed="false">Gráficos</button>
     </nav>
     <div class="top-actions">
       <button class="top-action settings-open" type="button" aria-label="Abrir configuración">
@@ -37,88 +37,145 @@
   </header>
 
   <main class="workspace">
-    <div class="page-intro">
+    <section class="greeting" aria-label="Saludo">
       <div>
-        <p id="trip-dates" class="eyebrow">7–16 NOVIEMBRE 2026</p>
-        <h1 id="view-title">Gastos del viaje</h1>
+        <h1 id="greeting-title">Hola, María.</h1>
+        <p id="greeting-sub">Así va tu presupuesto.</p>
       </div>
-      <span class="trip-chip"><span class="trip-chip-dot" aria-hidden="true"></span>Moneda COP</span>
+      <p id="trip-dates" class="trip-pill"><span class="trip-pill-dot" aria-hidden="true"></span><span id="trip-dates-text">—</span><span id="trip-day" class="trip-day"></span></p>
+    </section>
+
+    <!-- ============ GASTOS ============ -->
+    <div id="expenses-view" class="view view-expenses" aria-label="Gastos del viaje">
+      <div class="col col-main">
+        <article id="balance-card" class="balance-card" aria-label="Dinero disponible">
+          <div class="balance-top">
+            <div>
+              <span class="balance-label">Dinero disponible</span>
+              <strong id="remaining-value" class="balance-amount">—</strong>
+            </div>
+            <div class="balance-side">
+              <span class="balance-chip" id="remaining-note">Presupuesto menos gastos</span>
+              <span class="balance-eur" id="remaining-eur" hidden></span>
+            </div>
+          </div>
+          <div class="meter" role="progressbar" aria-label="Porcentaje del presupuesto utilizado" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="hero-meter">
+            <span class="meter-fill" id="hero-meter-fill"></span>
+          </div>
+          <div class="meter-legend">
+            <span><i class="swatch spent" aria-hidden="true"></i>Gastado <b id="spent-value">—</b></span>
+            <span id="percent-hero" class="meter-pct">0 %</span>
+            <span><i class="swatch left" aria-hidden="true"></i>De <b id="budget-value">—</b></span>
+          </div>
+        </article>
+
+        <section class="entry-card card" aria-labelledby="entry-title">
+          <div class="card-head">
+            <h2 id="entry-title">Agregar un gasto</h2>
+            <span class="soft-note"><span class="soft-dot" aria-hidden="true"></span>Se guarda al instante</span>
+          </div>
+          <form id="expense-form" class="expense-form" novalidate>
+            <input type="hidden" id="expense-id">
+            <div class="field date-field"><label for="expense-date-text">Fecha</label><div class="date-picker-control"><input id="expense-date-text" name="date_display" type="text" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa" aria-describedby="expense-date-hint" required><input id="expense-date-picker" class="native-date-picker" type="date" tabindex="-1" aria-hidden="true"><button id="open-expense-date" class="calendar-button" type="button" aria-label="Elegir fecha"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="16" height="15" rx="2"/><path d="M8 3.5v5M16 3.5v5M4 10h16"/></svg></button></div><span id="expense-date-hint" class="visually-hidden">Formato día, mes y año: DD/MM/AAAA.</span></div>
+            <div class="field description-field"><label for="expense-description">Descripción</label><input id="expense-description" name="description" maxlength="120" autocomplete="off" placeholder="Opcional"></div>
+            <div class="field category-field"><label for="expense-category">Categoría</label><div class="select-wrap"><select id="expense-category" name="category_id" required></select></div></div>
+            <div class="field amount-field"><label for="expense-amount">Valor en pesos</label><div class="money-input"><span aria-hidden="true">$</span><input id="expense-amount" name="amount" type="number" min="1" step="1" inputmode="numeric" placeholder="125000" required aria-describedby="amount-hint"></div></div>
+            <div class="form-actions">
+              <button class="button primary save-button" id="save-expense" type="submit"><span class="save-symbol" aria-hidden="true">＋</span><span class="save-label">Guardar gasto</span></button>
+              <button class="button ghost hidden" id="cancel-edit" type="button">Cancelar</button>
+            </div>
+          </form>
+          <div class="form-foot">
+            <p id="amount-hint" class="form-hint">Escribe el valor en pesos, sin puntos.</p>
+            <p id="expense-feedback" class="feedback" role="status" aria-live="polite"></p>
+          </div>
+        </section>
+
+        <details id="history-details" class="history card">
+          <summary class="history-summary">
+            <span class="history-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 6.5h11M8 12h11M8 17.5h11"/><circle cx="4.5" cy="6.5" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17.5" r="1"/></svg></span>
+            <span class="history-title"><strong>Mis gastos</strong><span id="history-count" class="history-count">0 movimientos</span></span>
+            <span class="history-toggle"><span id="history-toggle-label">Ver gastos</span><svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg></span>
+          </summary>
+          <div class="history-body">
+            <div class="history-tools">
+              <div class="filter-control">
+                <label for="expense-filter-text">Ver un día</label>
+                <div class="filter-input-row"><span class="date-picker-control"><input id="expense-filter-text" type="text" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa" aria-label="Fecha para buscar gastos"><input id="expense-filter-picker" class="native-date-picker" type="date" tabindex="-1" aria-hidden="true"><button id="open-filter-date" class="calendar-button" type="button" aria-label="Elegir día para buscar"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="16" height="15" rx="2"/><path d="M8 3.5v5M16 3.5v5M4 10h16"/></svg></button></span><button id="clear-date-filter" class="button text-button" type="button" hidden>Ver todos</button></div>
+              </div>
+              <label class="sort-control" for="sort-order"><span>Orden</span><span class="select-wrap compact"><select id="sort-order"><option value="desc">Más recientes</option><option value="asc">Más antiguos</option></select></span></label>
+              <p id="filter-status" class="filter-status" aria-live="polite">Tus totales siempre incluyen todos los gastos.</p>
+            </div>
+            <div class="expense-list-wrap"><div id="expense-list" class="expense-list" aria-live="polite"></div></div>
+          </div>
+        </details>
+      </div>
+
+      <aside class="col col-side" aria-label="Panorama y conversor">
+        <section class="overview card" aria-labelledby="overview-title">
+          <div class="card-head"><h2 id="overview-title">Tu viaje en cifras</h2><button class="link-button" type="button" data-view="summary">Ver gráficos <span aria-hidden="true">→</span></button></div>
+          <dl class="stat-grid">
+            <div class="stat"><dt>Puedes gastar hoy</dt><dd id="today-daily">—</dd><dd class="stat-note" id="today-daily-note">por día</dd></div>
+            <div class="stat"><dt>Días restantes</dt><dd id="days-left">—</dd><dd class="stat-note" id="days-left-note">de viaje</dd></div>
+          </dl>
+          <div class="mini-cats" id="mini-cats" aria-label="Gasto por categoría"></div>
+        </section>
+
+        <section class="converter card" aria-labelledby="fx-title">
+          <div class="card-head"><h2 id="fx-title">Conversor de moneda</h2><span class="fx-badge" id="fx-badge">…</span></div>
+          <div class="fx-row">
+            <label class="fx-field fx-in" for="fx-amount">
+              <span class="visually-hidden" id="fx-in-label">Cantidad en euros</span>
+              <input id="fx-amount" type="text" inputmode="decimal" autocomplete="off" value="50" aria-describedby="fx-in-label">
+              <span class="fx-code" id="fx-in-code">EUR</span>
+            </label>
+            <button class="fx-swap" id="fx-swap" type="button" aria-label="Invertir conversión: pasar de euros a pesos o de pesos a euros">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4 3.5 7.5 7 11M3.5 7.5h14M17 13l3.5 3.5L17 20m3.5-3.5h-14"/></svg>
+            </button>
+            <output class="fx-field fx-out" for="fx-amount" aria-live="polite">
+              <span id="fx-result" class="fx-result">—</span>
+              <span class="fx-code" id="fx-out-code">COP</span>
+            </output>
+          </div>
+          <div class="fx-rate">
+            <label for="fx-rate">1 EUR ≈</label>
+            <input id="fx-rate" type="text" inputmode="decimal" autocomplete="off" aria-label="Tasa de cambio: pesos colombianos por 1 euro">
+            <span>COP</span>
+            <button class="link-button" id="fx-live" type="button" hidden>Usar tasa en vivo</button>
+          </div>
+          <p class="fx-meta" id="fx-meta" aria-live="polite">Buscando la tasa…</p>
+          <p class="fx-disclaimer">Conversión aproximada. La tasa real puede variar.</p>
+        </section>
+      </aside>
     </div>
 
-    <section class="budget-strip" aria-label="Estado general del presupuesto">
-      <article class="balance-hero">
-        <span class="balance-label">Dinero disponible</span>
-        <strong id="remaining-value">—</strong>
-        <span class="balance-note" id="remaining-note">Presupuesto menos gastos</span>
-      </article>
-      <div class="budget-facts">
-        <article class="budget-fact">
-          <span class="fact-label">Presupuesto inicial</span>
-          <strong id="budget-value">—</strong>
-          <span class="fact-note" id="trip-length">—</span>
-        </article>
-        <article class="budget-fact">
-          <span class="fact-label">Total gastado</span>
-          <strong id="spent-value">—</strong>
-          <span class="fact-note" id="spent-note">Suma de tus gastos</span>
-        </article>
-      </div>
-    </section>
-
-    <section id="expenses-view" class="view-panel" aria-label="Gastos del viaje">
-      <section class="entry-panel panel" aria-labelledby="entry-title">
-        <div class="section-heading">
-          <div><p class="eyebrow">REGISTRO RÁPIDO</p><h2 id="entry-title">Agregar un gasto</h2></div>
-          <span class="save-note"><span class="save-dot" aria-hidden="true"></span>Se guarda al instante</span>
-        </div>
-        <form id="expense-form" class="expense-form">
-          <input type="hidden" id="expense-id">
-          <div class="field date-field"><label for="expense-date-text">Fecha</label><div class="date-picker-control"><input id="expense-date-text" name="date_display" type="text" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa" aria-describedby="expense-date-hint" required><input id="expense-date-picker" class="native-date-picker" type="date" tabindex="-1" aria-hidden="true"><button id="open-expense-date" class="calendar-button" type="button" aria-label="Elegir fecha"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="16" height="15" rx="2"/><path d="M8 3.5v5M16 3.5v5M4 10h16"/></svg></button></div><span id="expense-date-hint" class="visually-hidden">Formato día, mes y año: DD/MM/AAAA.</span></div>
-          <div class="field description-field"><label for="expense-description">Descripción <span class="optional">· opcional</span></label><input id="expense-description" name="description" maxlength="120" placeholder="Ej. Almuerzo"></div>
-          <div class="field category-field"><label for="expense-category">Categoría</label><select id="expense-category" name="category_id" required></select></div>
-          <div class="field amount-field"><label for="expense-amount">Valor en pesos</label><div class="money-input"><span aria-hidden="true">$</span><input id="expense-amount" name="amount" type="number" min="1" step="1" inputmode="numeric" placeholder="125000" required></div></div>
-          <div class="form-actions"><button class="button primary save-button" id="save-expense" type="submit"><span class="save-symbol" aria-hidden="true">＋</span><span>Guardar gasto</span></button><button class="button secondary hidden" id="cancel-edit" type="button">Cancelar</button></div>
-        </form>
-        <p class="form-hint">Escribe el valor en pesos, sin puntos.</p>
-        <p id="expense-feedback" class="feedback" role="status" aria-live="polite"></p>
-      </section>
-
-      <details id="history-details" class="history-panel panel">
-        <summary class="history-summary">
-          <span class="history-title-group"><span class="history-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7.5h14M5 12h14M5 16.5h9"/><circle cx="3.5" cy="7.5" r=".5"/><circle cx="3.5" cy="12" r=".5"/><circle cx="3.5" cy="16.5" r=".5"/></svg></span><span><span class="history-kicker">MOVIMIENTOS</span><strong>Mis gastos</strong></span><span id="history-count" class="count-pill">0 registros</span></span>
-          <span class="history-toggle"><span id="history-toggle-label">Ver gastos</span><svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg></span>
-        </summary>
-        <div class="history-body">
-          <div class="history-tools">
-            <div class="filter-control">
-              <label for="expense-filter-text">Buscar gastos por día</label>
-              <div class="filter-input-row"><span class="date-picker-control"><input id="expense-filter-text" type="text" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa" aria-label="Fecha para buscar gastos"><input id="expense-filter-picker" class="native-date-picker" type="date" tabindex="-1" aria-hidden="true"><button id="open-filter-date" class="calendar-button" type="button" aria-label="Elegir día para buscar"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="16" height="15" rx="2"/><path d="M8 3.5v5M16 3.5v5M4 10h16"/></svg></button></span><button id="clear-date-filter" class="button text-button" type="button" hidden>Ver todos</button></div>
-            </div>
-            <label class="sort-control" for="sort-order"><span>Orden</span><select id="sort-order"><option value="desc">Más recientes</option><option value="asc">Más antiguos</option></select></label>
-            <p id="filter-status" class="filter-status" aria-live="polite">Tus totales siempre incluyen todos los gastos.</p>
-          </div>
-          <div class="expense-list-wrap"><div id="expense-list" class="expense-list" aria-live="polite"></div></div>
-        </div>
-      </details>
-    </section>
-
-    <section id="summary-view" class="view-panel hidden" aria-label="Resumen del viaje">
+    <!-- ============ GRÁFICOS ============ -->
+    <div id="summary-view" class="view view-summary hidden" aria-label="Gráficos del viaje">
       <div id="budget-warning" class="notice warning hidden" role="status"></div>
-      <section class="summary-status panel" aria-label="Avance del presupuesto">
-        <div class="summary-status-copy"><p class="eyebrow">PRESUPUESTO UTILIZADO</p><strong id="percent-value">0 %</strong><p id="recommendation" class="recommended-line">Recomendado para el viaje: —</p><p id="original-daily" class="original-daily">Presupuesto original por día: —</p></div>
-        <div class="status-visual"><div class="progress-track" role="progressbar" aria-label="Porcentaje del presupuesto utilizado" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="progress-fill"></span></div><div class="progress-legend"><span><i class="dot spent-dot" aria-hidden="true"></i>Utilizado <b id="legend-spent">—</b></span><span><i class="dot available-dot" aria-hidden="true"></i>Disponible <b id="legend-remaining">—</b></span></div></div>
+      <section class="kpis" aria-label="Indicadores principales">
+        <article class="kpi kpi-available"><span>Disponible</span><strong id="kpi-remaining">—</strong></article>
+        <article class="kpi kpi-spent"><span>Gastado</span><strong id="kpi-spent">—</strong></article>
+        <article class="kpi"><span>Puedes gastar al día</span><strong id="kpi-daily">—</strong><small id="recommendation">—</small></article>
+        <article class="kpi"><span>Mayor gasto</span><strong id="kpi-top">—</strong><small id="kpi-top-amount">Aún sin gastos</small></article>
+      </section>
+      <section class="progress-card card" aria-label="Presupuesto utilizado">
+        <div class="progress-copy"><span class="eyebrow">Presupuesto utilizado</span><strong id="percent-value">0 %</strong></div>
+        <div class="progress-visual">
+          <div class="meter large" role="progressbar" aria-label="Porcentaje del presupuesto utilizado" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="summary-meter"><span class="meter-fill" id="progress-fill"></span></div>
+          <div class="meter-legend"><span><i class="swatch spent" aria-hidden="true"></i>Utilizado <b id="legend-spent">—</b></span><span><i class="swatch left" aria-hidden="true"></i>Disponible <b id="legend-remaining">—</b></span></div>
+        </div>
       </section>
       <div class="chart-grid">
-        <section class="chart-panel panel" aria-labelledby="category-chart-title">
-          <div class="chart-heading"><div><p class="eyebrow">EN QUÉ SE VA</p><h2 id="category-chart-title">Gastos por categoría</h2></div><span id="top-category" class="top-category" hidden></span></div>
-          <div class="chart-wrap category-chart-wrap"><canvas id="category-chart" aria-label="Barras de gastos por categoría"></canvas><p id="category-empty" class="chart-empty hidden">Cuando registres un gasto, aquí verás la categoría.</p></div>
+        <section class="chart-card card" aria-labelledby="category-chart-title">
+          <div class="card-head"><h2 id="category-chart-title">Gasto por categoría</h2><span class="chart-sub">Total y porcentaje</span></div>
+          <div class="chart-wrap category-chart-wrap" id="category-wrap"><canvas id="category-chart" role="img" aria-label="Barras de gastos por categoría"></canvas><p id="category-empty" class="chart-empty hidden">Cuando registres un gasto, aquí verás en qué se va tu dinero.</p></div>
         </section>
-        <section class="chart-panel panel" aria-labelledby="daily-chart-title">
-          <div class="chart-heading"><div><p class="eyebrow">CUÁNDO GASTAS</p><h2 id="daily-chart-title">Gasto día a día</h2></div><span class="chart-key"><i aria-hidden="true"></i>Presupuesto diario</span></div>
-          <div class="chart-wrap daily-chart-wrap"><canvas id="daily-chart" aria-label="Columnas de gastos diarios comparadas con el presupuesto diario"></canvas><p id="daily-empty" class="chart-empty hidden">Aún no hay gastos para mostrar.</p></div>
+        <section class="chart-card card" aria-labelledby="daily-chart-title">
+          <div class="card-head"><h2 id="daily-chart-title">Gasto día a día</h2><span class="chart-key"><i class="key-bar" aria-hidden="true"></i>Dentro<i class="key-bar over" aria-hidden="true"></i>Sobre el plan<i class="key-line" aria-hidden="true"></i>Plan diario <b id="plan-daily">—</b></span></div>
+          <div class="chart-wrap daily-chart-wrap"><canvas id="daily-chart" role="img" aria-label="Columnas de gastos diarios comparadas con el presupuesto diario"></canvas><p id="daily-empty" class="chart-empty hidden">Aún no hay gastos para mostrar.</p></div>
         </section>
       </div>
-    </section>
+    </div>
   </main>
 
   <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
