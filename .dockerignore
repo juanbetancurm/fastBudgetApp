@@ -1,0 +1,10 @@
+.git
+.env
+.venv
+__pycache__
+*.py[cod]
+*.sqlite3
+*.db
+tests
+Presupuesto_de_viaje.xlsm
+.inspect_xlsm.py

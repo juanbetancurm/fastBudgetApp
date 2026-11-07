@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f6f3"><meta name="csrf-token" content="{{ csrf_token }}">
+  <title>Presupuesto de viaje</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/overrides.css') }}">
+  <script defer src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Presupuesto de viaje, inicio"><span class="brand-mark small">V</span><span>Mi viaje</span></a>
+    <nav class="main-nav" aria-label="Navegación principal">
+      <button class="nav-link selected" type="button" data-view="expenses">Gastos</button>
+      <button class="nav-link" type="button" data-view="summary">Resumen</button>
+    </nav>
+    <div class="top-actions">
+      <button class="button quiet settings-open" type="button" aria-label="Configuración">Configuración</button>
+      <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button quiet" type="submit">Salir</button></form>
+    </div>
+  </header>
+  <main class="page-shell">
+    <div class="page-heading">
+      <div><p id="trip-dates" class="eyebrow">7–16 NOVIEMBRE 2026</p><h1 id="view-title">Gastos del viaje</h1></div>
+      <button class="button outline settings-open mobile-settings" type="button">Configuración</button>
+    </div>
+
+    <section class="kpis" aria-label="Estado del presupuesto">
+      <article class="kpi"><span class="kpi-label">Presupuesto inicial</span><strong id="budget-value">—</strong><span class="kpi-note" id="trip-length">—</span></article>
+      <article class="kpi"><span class="kpi-label">Total gastado</span><strong id="spent-value">—</strong><span class="kpi-note" id="spent-note">Suma de tus gastos</span></article>
+      <article class="kpi remaining-kpi"><span class="kpi-label">Dinero disponible</span><strong id="remaining-value">—</strong><span class="kpi-note" id="remaining-note">Presupuesto menos gastos</span></article>
+    </section>
+
+    <section id="expenses-view" class="view-panel">
+      <section class="entry-panel panel" aria-labelledby="entry-title">
+        <div class="section-title"><div><p class="eyebrow">REGISTRO RÁPIDO</p><h2 id="entry-title">Agregar un gasto</h2></div><span class="secure-label">Se guarda al instante</span></div>
+        <form id="expense-form" class="expense-form">
+          <input type="hidden" id="expense-id">
+          <div class="field date-field"><label for="expense-date">Fecha</label><input id="expense-date" name="date" type="date" required></div>
+          <div class="field description-field"><label for="expense-description">Descripción <span class="optional">(opcional)</span></label><input id="expense-description" name="description" maxlength="120" placeholder="Ej. Almuerzo"></div>
+          <div class="field category-field"><label for="expense-category">Categoría</label><select id="expense-category" name="category_id" required></select></div>
+          <div class="field amount-field"><label for="expense-amount">Valor en pesos</label><div class="money-input"><span aria-hidden="true">$</span><input id="expense-amount" name="amount" type="number" min="1" step="1" inputmode="numeric" placeholder="125000" required></div><small>Escribe el valor sin puntos.</small></div>
+          <div class="form-actions"><button class="button primary save-button" id="save-expense" type="submit">Guardar gasto</button><button class="button quiet hidden" id="cancel-edit" type="button">Cancelar</button></div>
+        </form>
+        <p id="expense-feedback" class="feedback" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="history-panel panel" aria-labelledby="history-title">
+        <div class="section-title history-heading"><div><p class="eyebrow">MOVIMIENTOS</p><h2 id="history-title">Gastos registrados</h2></div><label class="sort-control">Ordenar por <select id="sort-order"><option value="desc">Más recientes</option><option value="asc">Más antiguos</option></select></label></div>
+        <div id="expense-list" class="expense-list" aria-live="polite"></div>
+      </section>
+    </section>
+
+    <section id="summary-view" class="view-panel hidden" aria-label="Resumen del viaje">
+      <div id="budget-warning" class="notice warning hidden" role="status"></div>
+      <section class="summary-highlight panel">
+        <div class="progress-copy"><p class="eyebrow">PRESUPUESTO UTILIZADO</p><strong id="percent-value">0 %</strong><p id="recommendation">Presupuesto recomendado: —</p><p id="original-daily" class="original-daily">Presupuesto original por día: —</p></div>
+        <div class="progress-track" role="progressbar" aria-label="Porcentaje del presupuesto utilizado" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="progress-fill"></span></div>
+        <div class="progress-legend"><span><i class="dot spent-dot"></i>Utilizado <b id="legend-spent">—</b></span><span><i class="dot available-dot"></i>Disponible <b id="legend-remaining">—</b></span></div>
+      </section>
+      <div class="chart-grid">
+        <section class="chart-panel panel"><div class="section-title"><div><p class="eyebrow">DISTRIBUCIÓN</p><h2>Gastos por categoría</h2></div><span id="top-category" class="top-category"></span></div><div class="chart-wrap"><canvas id="category-chart" aria-label="Gráfico de gastos por categoría"></canvas><p id="category-empty" class="chart-empty hidden">Cuando registres gastos, aquí verás en qué categorías se concentra el gasto.</p></div></section>
+        <section class="chart-panel panel"><div class="section-title"><div><p class="eyebrow">DÍA A DÍA</p><h2>Gastos por día</h2></div></div><div class="chart-wrap"><canvas id="daily-chart" aria-label="Gráfico de gastos por día"></canvas><p id="daily-empty" class="chart-empty hidden">Aún no hay gastos registrados para mostrar.</p></div></section>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="settings-dialog" class="settings-dialog">
+    <form method="dialog" class="dialog-head"><div><p class="eyebrow">TU VIAJE</p><h2>Configuración</h2></div><button class="icon-button" aria-label="Cerrar" value="cancel">×</button></form>
+    <form id="settings-form" class="settings-form">
+      <div class="field"><label for="setting-budget">Presupuesto inicial (COP)</label><input id="setting-budget" type="number" min="1" step="1" required></div>
+      <div class="settings-dates"><div class="field"><label for="setting-start">Inicio del viaje</label><input id="setting-start" type="date" required></div><div class="field"><label for="setting-end">Fin del viaje</label><input id="setting-end" type="date" required></div></div>
+      <button class="button primary full" type="submit">Guardar cambios</button>
+    </form>
+    <div class="category-settings"><h3>Categorías</h3><p class="muted small-copy">Al cambiar el nombre, tus gastos anteriores conservan su categoría.</p><ul id="category-settings-list" class="category-list"></ul>
+      <form id="category-form" class="add-category"><label class="visually-hidden" for="new-category">Nueva categoría</label><input id="new-category" maxlength="40" placeholder="Nueva categoría" required><button class="button outline" type="submit">Agregar</button></form>
+    </div>
+    <p id="settings-feedback" class="feedback" role="status" aria-live="polite"></p>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
